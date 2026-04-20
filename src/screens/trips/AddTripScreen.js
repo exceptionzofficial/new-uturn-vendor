@@ -21,6 +21,7 @@ import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Share from 'react-native-share';
 import { COLORS, RADIUS, SHADOW, SPACING, TYPOGRAPHY } from '../../theme/AppTheme';
 import { GOOGLE_MAPS_API_KEY } from '../../config/Config';
+import apiService from '../../services/api';
 
 const { width, height } = Dimensions.get('window');
 
@@ -142,11 +143,12 @@ const AddTripScreen = ({ navigation }) => {
   // Pricing Calculation Effect
   useEffect(() => {
     const total = parseFloat(formData.totalTripAmount) || 0;
-    const myEarnings = parseFloat(formData.commission) || 0;
-    const payout = Math.max(0, total - myEarnings).toString();
+    const commPct = parseFloat(formData.commission) || 0;
+    const myEarnings = (total * commPct) / 100;
+    const payout = Math.max(0, total - myEarnings);
     
-    if (formData.driverPayout !== payout) {
-      setFormData(prev => ({ ...prev, driverPayout: payout }));
+    if (formData.driverPayout !== payout.toString() || formData.myEarningsValue !== myEarnings.toString()) {
+      setFormData(prev => ({ ...prev, driverPayout: payout.toString(), myEarningsValue: myEarnings.toString() }));
     }
   }, [formData.totalTripAmount, formData.commission]);
 
@@ -198,24 +200,122 @@ const AddTripScreen = ({ navigation }) => {
     }
   };
 
-  const handlePublish = () => {
-    if (!formData.customerName || !formData.customerPhone || !formData.pickup) {
-      Alert.alert('Required Fields', 'Please fill all mandatory details.');
+  // Check Customer info when 10 digits are filled
+  useEffect(() => {
+    const checkCust = async () => {
+      if (formData.customerPhone?.length === 10) {
+        try {
+          const res = await apiService.checkCustomer(formData.customerPhone);
+          if (res.exists) {
+            setFormData(prev => ({ 
+              ...prev, 
+              customerName: res.name || prev.customerName,
+              customerLanguage: res.language || prev.customerLanguage 
+            }));
+            Alert.alert('Customer Found', `Welcome back, ${res.name || 'Customer'}`);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+    checkCust();
+  }, [formData.customerPhone]);
+
+  const handlePublish = async () => {
+    if (!formData.customerName || !formData.customerPhone || !formData.pickup || !formData.drop) {
+      Alert.alert('Required Fields', 'Please fill all mandatory details (Customer Info, Pickup, Drop).');
       return;
     }
-    Alert.alert('Trip Published', 'Successfully published trip to drivers.');
+
+    // Date Validation
+    try {
+      const parts = formData.scheduledDate.split('/');
+      // Assuming DD/MM/YYYY or MM/DD/YYYY, let's use standard Date parse. Better to construct safely
+      // For simplicity, just use new Date(scheduledDate + ' ' + scheduledTime)
+      const scheduledDateTime = new Date(`${formData.scheduledDate} ${formData.scheduledTime}`);
+      if (scheduledDateTime < new Date()) {
+        Alert.alert('Cannot Publish', 'The scheduled date and time has already passed.');
+        return;
+      }
+    } catch(e) {
+      console.log('Date parse error', e);
+    }
+
+    try {
+      const tripParams = {
+        ...formData,
+        status: 'pending',
+        pickupAddress: formData.pickup,
+        dropAddress: formData.drop,
+        pickupLocation: formData.pickupCoords,
+        dropLocation: formData.dropCoords,
+        scheduleDate: formData.scheduledDate,
+        scheduleTime: formData.scheduledTime,
+        totalFare: formData.totalTripAmount,
+        vendorCommissionPercentage: 0,
+      };
+      
+      const res = await apiService.createTrip(tripParams);
+      if (res.success) {
+         Alert.alert('Trip Published', 'Successfully published trip to drivers.', [
+           { text: 'OK', onPress: () => navigation.goBack() }
+         ]);
+      } else {
+         Alert.alert('Error', res.message || 'Failed to publish trip');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'An error occurred while publishing.');
+      console.error(err);
+    }
   };
 
-  const handleSave = () => {
-    Alert.alert('Success', 'Trip details saved as draft.');
+  const handleSave = async () => {
+    try {
+      const tripParams = {
+        ...formData,
+        status: 'draft',
+        pickupAddress: formData.pickup,
+        dropAddress: formData.drop,
+        pickupLocation: formData.pickupCoords,
+        dropLocation: formData.dropCoords,
+        scheduleDate: formData.scheduledDate,
+        scheduleTime: formData.scheduledTime,
+        totalFare: formData.totalTripAmount,
+      };
+      const res = await apiService.createTrip(tripParams);
+      if (res.success) {
+        Alert.alert('Success', 'Trip details saved as draft.', [
+           { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
+      }
+    } catch (err) {
+      Alert.alert('Error', 'An error occurred while saving draft.');
+    }
   };
 
   const handleShare = async () => {
     try {
+      const shareMessage = `🚖 *UTurn Trip Details*
+---------------------------------
+👤 *Customer:* ${formData.customerName}
+📞 *Phone:* ${formData.customerPhone}
+📍 *Pickup:* ${formData.pickup}
+📍 *Drop:* ${formData.drop}
+📅 *Date:* ${formData.scheduledDate}
+⏰ *Time:* ${formData.scheduledTime}
+🚗 *Vehicle:* ${formData.vehicle}
+🔄 *Type:* ${formData.tripType}
+💳 *Payment:* ${formData.paymentMode === 'pay_driver' ? 'Pay to Driver' : 'Pay to Vendor'}
+💰 *Total Amount:* ₹${formData.totalTripAmount}
+---------------------------------
+🔗 *Track Live:* https://uturnapp.com/track/coming-soon
+*Note: Toll, Parking, Permit Extra...*
+*Sent via UTurn Vendor App*`;
+
       const shareOptions = {
         title: 'Share Booking Details',
-        message: `U-TURN Booking Link\n\nCustomer: ${formData.customerName}\nPickup: ${formData.pickup}\nDrop: ${formData.drop}\nFare: ₹${formData.totalTripAmount}`,
-        url: 'https://uturnapp.com/booking',
+        message: shareMessage,
       };
       await Share.open(shareOptions);
     } catch (error) {
@@ -563,7 +663,7 @@ const AddTripScreen = ({ navigation }) => {
           {renderPricingRow('Driver Bata (₹) / per day', formData.driverBata, 'driverBata')}
           {renderPricingRow('Night Allowance (₹)', formData.nightAllowance, 'nightAllowance')}
           {renderPricingRow('Hills Allowance (₹)', formData.hillsAllowance, 'hillsAllowance')}
-          {renderPricingRow('Commission (₹)', formData.commission, 'commission')}
+          {renderPricingRow('Commission (%)', formData.commission, 'commission')}
         </View>
 
         {/* 5. Pricing Summary Card */}
@@ -589,14 +689,15 @@ const AddTripScreen = ({ navigation }) => {
             </View>
 
             {/* Earnings and Payout Display */}
+            {/* Earnings and Payout Display */}
             <View style={styles.pricingSplitRow}>
                 <View style={styles.pricingSplitBox}>
                     <Text style={styles.splitLabel}>My Earnings (₹)</Text>
-                    <Text style={styles.splitValue}>{formData.commission}</Text>
+                    <Text style={styles.splitValue}>{parseFloat(formData.myEarningsValue || 0).toFixed(2)}</Text>
                 </View>
                 <View style={styles.pricingSplitBox}>
                     <Text style={styles.splitLabel}>Driver Payout (₹)</Text>
-                    <Text style={[styles.splitValue, { color: COLORS.success }]}>{formData.driverPayout}</Text>
+                    <Text style={[styles.splitValue, { color: COLORS.success }]}>{parseFloat(formData.driverPayout || 0).toFixed(2)}</Text>
                 </View>
             </View>
 

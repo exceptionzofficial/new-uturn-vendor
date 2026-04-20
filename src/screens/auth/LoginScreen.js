@@ -5,21 +5,30 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   Animated,
   Dimensions,
   Image,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ScrollView,
 } from 'react-native';
+
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import OtpVerify from 'react-native-otp-verify';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme/AppTheme';
+import apiClient from '../../services/api';
 
 const { width, height } = Dimensions.get('window');
 
 const LoginScreen = ({ navigation }) => {
   const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [appHash, setAppHash] = useState('');
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
   const logoScale = useRef(new Animated.Value(0.2)).current;
@@ -44,7 +53,50 @@ const LoginScreen = ({ navigation }) => {
         useNativeDriver: true,
       }),
     ]).start();
+
+    // Get the App Hash for SMS Retriever API
+    OtpVerify.getHash()
+      .then(hash => {
+        if (hash && hash.length > 0) {
+          setAppHash(hash[0]);
+        }
+      })
+      .catch(err => console.log('Hash Error:', err));
   }, []);
+
+  const handleGetVerificationCode = async () => {
+    if (phone.length !== 10) {
+      Alert.alert('Invalid Number', 'Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Check if vendor exists or needs registration
+      const statusRes = await apiClient.checkPhone(phone);
+      const exists = statusRes.exists;
+
+      // 2. Send OTP
+      const otpRes = await apiClient.sendOtp(phone);
+
+      if (otpRes.success) {
+        navigation.navigate('Otp', { 
+          phone, 
+          isNewUser: !exists 
+        });
+      } else {
+        Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      }
+    } catch (err) {
+      console.error('Login Error:', err.message);
+      if (err.config) {
+        console.error('Request URL:', err.config.url);
+      }
+      Alert.alert('Connection Error', 'Unable to reach the server. Please check your internet or retry in a few seconds (Server might be waking up).');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -53,88 +105,96 @@ const LoginScreen = ({ navigation }) => {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.content}>
-          <Animated.View style={[styles.header, {
-            opacity: fadeAnim,
-            transform: [{ scale: logoScale }]
-          }]}>
-            <View style={styles.logoContainer}>
-              <Image
-                source={require('../../assets/logo.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-            </View>
-          </Animated.View>
-
-          <Animated.View style={[styles.body, {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }]
-          }]}>
-            <Text style={styles.title}>Secure Sign In</Text>
-            <Text style={styles.subtitle}>Enter your business phone number to access your vendor dashboard.</Text>
-
-            <View style={styles.inputCard}>
-              <View style={styles.inputHeader}>
-                <Text style={styles.inputLabel}>PHONE NUMBER</Text>
-                <Icon name="shield-lock-outline" size={16} color={COLORS.success} />
-              </View>
-
-              <View style={styles.phoneInputWrapper}>
-                <View style={styles.countryPicker}>
-                  <Text style={styles.flag}>🇮🇳</Text>
-                  <Text style={styles.countryCode}>+91</Text>
-                  <Icon name="chevron-down" size={16} color={COLORS.textLight} />
-                </View>
-                <View style={styles.divider} />
-                <TextInput
-                  placeholder="000 000 0000"
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="phone-pad"
-                  maxLength={10}
-                  style={styles.input}
-                  value={phone}
-                  onChangeText={setPhone}
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.content}>
+            <Animated.View style={[styles.header, {
+              opacity: fadeAnim,
+              transform: [{ scale: logoScale }]
+            }]}>
+              <View style={styles.logoContainer}>
+                <Image
+                  source={require('../../assets/logo.png')}
+                  style={styles.logo}
+                  resizeMode="contain"
                 />
               </View>
-            </View>
+            </Animated.View>
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => navigation.navigate('Register')} // Skipping OTP simulation for direct flow
-              style={[styles.loginBtn, phone.length === 10 ? styles.loginBtnActive : null]}
-              disabled={phone.length !== 10}
-            >
-              <LinearGradient
-                colors={phone.length === 10 ? ['#1A237E', '#3D5AFE'] : ['#BDBDBD', '#E0E0E0']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.btnGradient}
+            <Animated.View style={[styles.body, {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }]}>
+              <Text style={styles.title}>Secure Sign In</Text>
+              <Text style={styles.subtitle}>Enter your business phone number to access your vendor dashboard.</Text>
+
+              <View style={styles.inputCard}>
+                <View style={styles.inputHeader}>
+                  <Text style={styles.inputLabel}>PHONE NUMBER</Text>
+                  <Icon name="shield-lock-outline" size={16} color={COLORS.success} />
+                </View>
+
+                <View style={styles.phoneInputWrapper}>
+                  <View style={styles.countryPicker}>
+                    <Text style={styles.flag}>🇮🇳</Text>
+                    <Text style={styles.countryCode}>+91</Text>
+                    <Icon name="chevron-down" size={16} color={COLORS.textLight} />
+                  </View>
+                  <View style={styles.divider} />
+                  <TextInput
+                    placeholder="000 000 0000"
+                    placeholderTextColor={COLORS.textMuted}
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    style={styles.input}
+                    value={phone}
+                    onChangeText={setPhone}
+                  />
+                </View>
+              </View>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleGetVerificationCode}
+                style={[styles.loginBtn, phone.length === 10 ? styles.loginBtnActive : null]}
+                disabled={phone.length !== 10 || loading}
               >
-                <Text style={styles.btnText}>GET VERIFICATION CODE</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <View style={styles.options}>
-              <TouchableOpacity>
-                <Text style={styles.helpText}>Need help with login?</Text>
+                <LinearGradient
+                  colors={phone.length === 10 ? ['#1A237E', '#3D5AFE'] : ['#BDBDBD', '#E0E0E0']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.btnGradient}
+                >
+                  <Text style={styles.btnText}>{loading ? 'SENDING...' : 'GET VERIFICATION CODE'}</Text>
+                  {!loading && <Icon name="arrow-right" size={20} color="#FFF" style={{ marginLeft: 10 }} />}
+                </LinearGradient>
               </TouchableOpacity>
-              <View style={styles.dot} />
-              <TouchableOpacity>
-                <Text style={styles.helpText}>Contact Support</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
 
-          <Animated.View style={[styles.footer, { opacity: fadeAnim }]}>
-            <Text style={styles.termsText}>
-              By proceeding, you agree to our{' '}
-              <Text style={styles.link}>Terms of Service</Text> and{' '}
-              <Text style={styles.link}>Privacy Policy</Text>.
-            </Text>
-          </Animated.View>
-        </View>
+              <View style={styles.options}>
+                <TouchableOpacity>
+                  <Text style={styles.helpText}>Need help with login?</Text>
+                </TouchableOpacity>
+                <View style={styles.dot} />
+                <TouchableOpacity>
+                  <Text style={styles.helpText}>Contact Support</Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+
+            <Animated.View style={[styles.footer, { opacity: fadeAnim }]}>
+              <Text style={styles.termsText}>
+                By proceeding, you agree to our{' '}
+                <Text style={styles.link} onPress={() => {}}>Terms of Service</Text> and{' '}
+                <Text style={styles.link} onPress={() => {}}>Privacy Policy</Text>.
+              </Text>
+            </Animated.View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -152,6 +212,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: SPACING.lg,
     paddingTop: 60,
+    minHeight: height - 100, // Ensure content fills screen to keep footer at bottom
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   header: {
     alignItems: 'center',

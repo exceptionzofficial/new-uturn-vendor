@@ -10,6 +10,7 @@ import SplashScreen from './src/screens/auth/SplashScreen';
 import LanguageScreen from './src/screens/auth/LanguageScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
+import OtpScreen from './src/screens/auth/OtpScreen';
 import MainScreen from './src/screens/main/MainScreen';
 import AddTripScreen from './src/screens/trips/AddTripScreen';
 import WalletScreen from './src/screens/features/WalletScreen';
@@ -33,6 +34,7 @@ const App = () => {
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Language" component={LanguageScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Otp" component={OtpScreen} />
         <Stack.Screen name="Register" component={RegisterScreen} />
         <Stack.Screen name="Main" component={MainScreen} />
         <Stack.Screen name="AddTrip" component={AddTripScreen} />

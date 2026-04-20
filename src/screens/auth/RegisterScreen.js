@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  SafeAreaView,
   Dimensions,
   Platform,
   Alert,
@@ -14,11 +13,19 @@ import {
   FlatList,
   KeyboardAvoidingView,
   StatusBar,
+  Image,
 } from 'react-native';
+
+
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import ImagePicker from 'react-native-image-crop-picker';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme/AppTheme';
+import apiClient from '../../services/api';
+
 
 const { width, height } = Dimensions.get('window');
 
@@ -31,11 +38,17 @@ const INDIAN_STATES = [
   'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi'
 ];
 
-const RegisterScreen = ({ navigation }) => {
+const RegisterScreen = ({ navigation, route }) => {
+  const verifiedPhone = route.params?.verifiedPhone || '';
   const [loading, setLoading] = useState(false);
   const [showStateModal, setShowStateModal] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [stateSearch, setStateSearch] = useState('');
+
+  // Image states
+  const [aadharImage, setAadharImage] = useState(null);
+  const [profilePicture, setProfilePicture] = useState(null);
+
 
   // Consolidated Form State
   const [formData, setFormData] = useState({
@@ -70,21 +83,57 @@ const RegisterScreen = ({ navigation }) => {
     });
   }, [stateSearch]);
 
-  const handleSubmit = () => {
-    const { name, businessName, state, address } = formData;
-    if (!name || !businessName || !state || !address) {
-      Alert.alert('Required Fields', 'Please fill in name, business name, state and address.');
+  const handleSubmit = async () => {
+    const { name, businessName, state, address, dob, gstNumber } = formData;
+    if (!name || !businessName || !state || !address || !dob) {
+      Alert.alert('Required Fields', 'Please fill in name, DOB, business name, state and address.');
+      return;
+    }
+
+    if (!aadharImage || !profilePicture) {
+      Alert.alert('Documents Missing', 'Please capture both Aadhar ID Proof and Profile Picture.');
       return;
     }
 
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const form = new FormData();
+      
+      const appendFile = (field, file, name) => {
+        if (file) {
+          form.append(field, {
+            uri: Platform.OS === 'android' ? file.path : file.path.replace('file://', ''),
+            type: file.mime,
+            name: `${name}_${verifiedPhone}.jpg`,
+          });
+        }
+      };
+
+      appendFile('aadharImage', aadharImage, 'aadhar');
+      appendFile('profilePicture', profilePicture, 'profile');
+
+      const payload = {
+        ...formData,
+        phone: verifiedPhone
+      };
+
+      form.append('vendorData', JSON.stringify(payload));
+
+      const response = await apiClient.register(form);
+
+      if (response.success) {
+        Alert.alert('Success', 'Application Submitted. We will verify your documents soon.', [
+          { text: 'OK', onPress: () => navigation.replace('Splash') }
+        ]);
+      }
+    } catch (err) {
+      console.error('Registration Error:', err);
+      Alert.alert('Error', 'Failed to submit registration. Please try again.');
+    } finally {
       setLoading(false);
-      Alert.alert('Application Submitted', 'Welcome to UTURN Vendor Network. Verification in progress.', [
-        { text: 'GO TO DASHBOARD', onPress: () => navigation.replace('Main') }
-      ]);
-    }, 1500);
+    }
   };
+
 
   const renderInputField = (label, icon, value, onChangeText, placeholder = '', keyboardType = 'default') => (
     <View style={styles.inputGroup}>
@@ -116,25 +165,55 @@ const RegisterScreen = ({ navigation }) => {
     </View>
   );
 
-  const renderUploadCard = (title, subtitle, icon) => (
+  const pickImage = (type) => {
+    const options = {
+      width: type === 'profile' ? 400 : 800,
+      height: type === 'profile' ? 400 : 500,
+      cropping: true,
+      includeBase64: false,
+      useFrontCamera: type === 'profile',
+    };
+
+    ImagePicker.openCamera(options)
+      .then(image => {
+        if (type === 'aadhar') setAadharImage(image);
+        else setProfilePicture(image);
+      })
+      .catch(err => {
+        if (err.message !== 'User cancelled image selection') {
+          Alert.alert('Camera Error', 'Could not access camera.');
+        }
+      });
+  };
+
+  const renderUploadCard = (title, subtitle, icon, type, imageData) => (
     <View style={styles.docGroup}>
       <Text style={styles.inputLabel}>{title.toUpperCase()}</Text>
-      <TouchableOpacity activeOpacity={0.8} style={styles.uploadCard}>
+      <TouchableOpacity 
+        activeOpacity={0.8} 
+        style={[styles.uploadCard, imageData && styles.uploadCardSelected]}
+        onPress={() => pickImage(type)}
+      >
         <View style={styles.uploadInfo}>
-          <View style={styles.uploadIconCircle}>
-            <Icon name={icon} size={28} color={COLORS.primary} />
+          <View style={[styles.uploadIconCircle, imageData && styles.uploadIconCircleSelected]}>
+            {imageData ? (
+              <Image source={{ uri: imageData.path }} style={styles.previewImage} />
+            ) : (
+              <Icon name={icon} size={28} color={COLORS.primary} />
+            )}
           </View>
           <View style={{ flex: 1, marginLeft: 15 }}>
             <Text style={styles.uploadTitle}>{title}</Text>
-            <Text style={styles.uploadSubtitle}>{subtitle}</Text>
+            <Text style={styles.uploadSubtitle}>{imageData ? 'Document Captured' : subtitle}</Text>
           </View>
-          <View style={styles.addButton}>
-            <Icon name="plus" size={20} color="#FFF" />
+          <View style={[styles.addButton, imageData && styles.addButtonSelected]}>
+            <Icon name={imageData ? "check" : "plus"} size={20} color="#FFF" />
           </View>
         </View>
       </TouchableOpacity>
     </View>
   );
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -173,9 +252,10 @@ const RegisterScreen = ({ navigation }) => {
             <View style={styles.divider} />
 
             <Text style={styles.sectionHeading}>IDENTITY DOCUMENTS</Text>
-            {renderUploadCard('Aadhar ID Proof', 'Front & Back of Aadhar Card', 'card-account-details-outline')}
-            {renderUploadCard('Profile Picture', 'Clear face photo', 'camera-outline')}
+            {renderUploadCard('Aadhar ID Proof', 'Front & Back of Aadhar Card', 'card-account-details-outline', 'aadhar', aadharImage)}
+            {renderUploadCard('Profile Picture', 'Clear face photo', 'camera-outline', 'profile', profilePicture)}
           </View>
+
 
           <TouchableOpacity
             activeOpacity={0.85}
@@ -293,6 +373,22 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, height: 48, marginLeft: 10, fontWeight: '600', color: COLORS.text },
   stateItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   stateName: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  uploadCardSelected: {
+    borderColor: COLORS.primary,
+    backgroundColor: 'rgba(26, 35, 126, 0.02)',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  uploadIconCircleSelected: {
+    padding: 0,
+    overflow: 'hidden',
+  },
+  addButtonSelected: {
+    backgroundColor: '#4CAF50',
+  },
 });
 
 export default RegisterScreen;

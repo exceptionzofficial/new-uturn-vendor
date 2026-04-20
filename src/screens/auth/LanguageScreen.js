@@ -4,11 +4,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  SafeAreaView,
   Animated,
   Dimensions,
   FlatList,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { COLORS, RADIUS, SHADOW, SPACING, TYPOGRAPHY } from '../../theme/AppTheme';
@@ -178,52 +179,56 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
   },
   intro: {
     marginTop: 60,
     marginBottom: 40,
+    paddingHorizontal: SPACING.lg,
   },
   title: {
     fontSize: 28,
     fontWeight: '900',
-    color: COLORS.primaryDark,
-    letterSpacing: 0.5,
+    color: '#0D1B3E',
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 15,
     color: COLORS.textLight,
     lineHeight: 22,
-    marginTop: 8,
+    marginTop: 10,
     fontWeight: '600',
   },
   list: {
-    paddingBottom: 120,
+    paddingHorizontal: SPACING.md,
+    paddingBottom: 140, // Increased to ensure last row is fully visible above button
   },
   languageCard: {
     flex: 1,
-    margin: 8,
-    borderRadius: RADIUS.md,
+    margin: 10,
+    borderRadius: 24,
     overflow: 'hidden',
     ...SHADOW.light,
+    backgroundColor: '#FFF',
   },
   selectedCard: {
-    ...SHADOW.medium,
+    ...SHADOW.premium,
+    transform: [{ scale: 1.02 }],
   },
   cardGradient: {
-    padding: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 25,
     alignItems: 'center',
-    height: 140,
+    height: 160,
     justifyContent: 'center',
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: RADIUS.sm,
-    backgroundColor: 'rgba(26, 35, 126, 0.08)',
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: 'rgba(26, 35, 126, 0.05)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 15,
   },
   selectedIconContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
@@ -232,37 +237,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   languageName: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '900',
     color: COLORS.primaryDark,
   },
   nativeName: {
-    fontSize: 11,
-    color: COLORS.textLight,
-    marginTop: 2,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 4,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   selectedText: {
     color: '#FFF',
   },
   selectedTextMuted: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   checkIcon: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 12,
+    right: 12,
   },
   footer: {
     position: 'absolute',
-    bottom: 30,
-    left: SPACING.lg,
-    right: SPACING.lg,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: 40,
+    paddingTop: 20,
+    backgroundColor: 'rgba(245, 247, 250, 0.9)', // Glassmorphism-like background
   },
   continueBtn: {
     height: 64,
-    borderRadius: 20,
+    borderRadius: 22,
     overflow: 'hidden',
     ...SHADOW.medium,
   },
@@ -271,13 +280,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 30,
   },
   btnText: {
     color: '#FFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '900',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     marginRight: 10,
   },
 });
