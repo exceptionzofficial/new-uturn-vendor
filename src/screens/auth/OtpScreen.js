@@ -123,10 +123,16 @@ const OtpScreen = ({ navigation, route }) => {
       const response = await apiClient.verifyOtp(phone, otp);
       if (response.success) {
         // Save session
-        await AsyncStorage.setItem('vendor_session', JSON.stringify({ phone }));
+        // Save session with status
+        const sessionData = { 
+          phone, 
+          status: response.status 
+        };
+        await AsyncStorage.setItem('vendor_session', JSON.stringify(sessionData));
+        await AsyncStorage.setItem('vendor_data', JSON.stringify(sessionData));
         await AsyncStorage.setItem('is_logged_in', 'true');
 
-        if (isNewUser) {
+        if (isNewUser || response.status === 'NOT_REGISTERED') {
           navigation.replace('Register', { verifiedPhone: phone });
         } else {
           navigation.replace('Main');

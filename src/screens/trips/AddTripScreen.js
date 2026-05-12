@@ -22,6 +22,7 @@ import Share from 'react-native-share';
 import { COLORS, RADIUS, SHADOW, SPACING, TYPOGRAPHY } from '../../theme/AppTheme';
 import { GOOGLE_MAPS_API_KEY } from '../../config/Config';
 import apiService from '../../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -53,7 +54,8 @@ const RENTAL_TYPES = [
 
 const LANGUAGES = ['Tamil', 'English', 'Hindi', 'Telugu', 'Malayalam', 'Kannada', 'Others'];
 
-const AddTripScreen = ({ navigation }) => {
+const AddTripScreen = ({ navigation, route }) => {
+  const [isReadOnly, setIsReadOnly] = useState(route.params?.trip?.status === 'pending');
   const [formData, setFormData] = useState({
     customerName: '',
     customerPhone: '',
@@ -87,6 +89,25 @@ const AddTripScreen = ({ navigation }) => {
     
     paymentMode: 'pay_driver', // default to Customer Pays Driver
   });
+
+  useEffect(() => {
+    if (route.params?.trip) {
+      const t = route.params.trip;
+      setFormData(prev => ({
+        ...prev,
+        ...t,
+        pickup: t.pickup || t.pickupAddress || '',
+        drop: t.drop || t.dropAddress || '',
+        totalTripAmount: (t.totalTripAmount || t.totalFare || '0').toString(),
+        baseFare: (t.baseFare || '0').toString(),
+        perKmRate: (t.perKmRate || '0').toString(),
+        waitingCharge: (t.waitingCharge || '0').toString(),
+        driverBata: (t.driverBata || '0').toString(),
+        commission: (t.commission || '0').toString(),
+        stops: t.stops || [],
+      }));
+    }
+  }, [route.params?.trip]);
 
   const [isLangModalVisible, setLangModalVisible] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -140,6 +161,21 @@ const AddTripScreen = ({ navigation }) => {
     }
   }, [formData.numberOfPeople, formData.category, formData.vehicle, formData.tripType]);
 
+  const addStop = () => {
+    setFormData(p => ({ ...p, stops: [...p.stops, ''] }));
+  };
+
+  const updateStop = (val, idx) => {
+    const newStops = [...formData.stops];
+    newStops[idx] = val;
+    setFormData(p => ({ ...p, stops: newStops }));
+  };
+
+  const removeStop = (idx) => {
+    const newStops = formData.stops.filter((_, i) => i !== idx);
+    setFormData(p => ({ ...p, stops: newStops }));
+  };
+
   // Pricing Calculation Effect
   useEffect(() => {
     const total = parseFloat(formData.totalTripAmount) || 0;
@@ -151,6 +187,32 @@ const AddTripScreen = ({ navigation }) => {
       setFormData(prev => ({ ...prev, driverPayout: payout.toString(), myEarningsValue: myEarnings.toString() }));
     }
   }, [formData.totalTripAmount, formData.commission]);
+
+  // Total Fare Auto-calculate Effect
+  useEffect(() => {
+    const base = parseFloat(formData.baseFare) || 0;
+    const pm = parseFloat(formData.perKmRate) || 0;
+    const db = parseFloat(formData.driverBata) || 0;
+    const na = parseFloat(formData.nightAllowance) || 0;
+    const ha = parseFloat(formData.hillsAllowance) || 0;
+
+    let distVal = 0;
+    if (formData.estimatedDistance) {
+      // e.g., '14.5 km' -> 14.5
+      const cleaned = formData.estimatedDistance.replace(/,/g, '');
+      const match = cleaned.match(/([\d.]+)/);
+      if (match) distVal = parseFloat(match[1]);
+    }
+
+    // Typical rule: base + (distance * perKm) + allowances
+    // You can adjust distance thresholding if base covers first X km.
+    let computed = base + (distVal * pm) + db + na + ha;
+    
+    // Only override if there is an actual calculated value and it differs
+    if (computed > 0 && Math.abs(computed - parseFloat(formData.totalTripAmount)) > 1) {
+       setFormData(prev => ({ ...prev, totalTripAmount: Math.round(computed).toString() }));
+    }
+  }, [formData.baseFare, formData.perKmRate, formData.driverBata, formData.nightAllowance, formData.hillsAllowance, formData.estimatedDistance]);
 
   // Suggestions Fetcher
   const fetchSuggestions = async (query) => {
@@ -183,14 +245,26 @@ const AddTripScreen = ({ navigation }) => {
         const latlng = { latitude: coords.lat, longitude: coords.lng };
         setFormData(p => ({ ...p, [field + 'Coords']: latlng }));
 
-        // Fit map to markers
         if (formData.pickupCoords && latlng || (field === 'pickup' && formData.dropCoords)) {
+          const pick = field === 'pickup' ? latlng : formData.pickupCoords;
+          const drop = field === 'drop' ? latlng : formData.dropCoords;
+
           setTimeout(() => {
-            const points = [];
-            if (field === 'pickup') points.push(latlng); else if (formData.pickupCoords) points.push(formData.pickupCoords);
-            if (field === 'drop') points.push(latlng); else if (formData.dropCoords) points.push(formData.dropCoords);
-            mapRef.current?.fitToCoordinates(points, { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
+            mapRef.current?.fitToCoordinates([pick, drop], { edgePadding: { top: 50, right: 50, bottom: 50, left: 50 }, animated: true });
           }, 500);
+
+          // Calculate Distance & ETA
+          try {
+            const distUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${pick.latitude},${pick.longitude}&destinations=${drop.latitude},${drop.longitude}&key=${GOOGLE_MAPS_API_KEY}`;
+            const distResp = await fetch(distUrl);
+            const distData = await distResp.json();
+            if (distData.rows[0]?.elements[0]?.status === "OK") {
+              const distanceText = distData.rows[0].elements[0].distance.text;
+              const durationText = distData.rows[0].elements[0].duration.text;
+              setFormData(p => ({ ...p, estimatedDistance: distanceText, estimatedTime: durationText }));
+            }
+          } catch(e) { console.error("Distance Error:", e); }
+
         } else {
           mapRef.current?.animateToRegion({ ...latlng, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 1000);
         }
@@ -228,6 +302,10 @@ const AddTripScreen = ({ navigation }) => {
       return;
     }
 
+    const vendor_data = await AsyncStorage.getItem('vendor_data');
+    const parsed = vendor_data ? JSON.parse(vendor_data) : null;
+    const vId = parsed?.vendorId || parsed?.phone || 'SYSTEM_VENDOR';
+
     // Date Validation
     try {
       const parts = formData.scheduledDate.split('/');
@@ -243,8 +321,17 @@ const AddTripScreen = ({ navigation }) => {
     }
 
     try {
+      // Calculate distance charge for driver breakdown (Total - Base - Bata - Allowances)
+      const totalAmt = parseFloat(formData.totalTripAmount || 0);
+      const bFare = parseFloat(formData.baseFare || 0);
+      const dBata = parseFloat(formData.driverBata || 0);
+      const nAllw = parseFloat(formData.nightAllowance || 0);
+      const hAllw = parseFloat(formData.hillsAllowance || 0);
+      const dCharge = totalAmt - bFare - dBata - nAllw - hAllw;
+
       const tripParams = {
         ...formData,
+        vendorId: vId,
         status: 'pending',
         pickupAddress: formData.pickup,
         dropAddress: formData.drop,
@@ -253,7 +340,9 @@ const AddTripScreen = ({ navigation }) => {
         scheduleDate: formData.scheduledDate,
         scheduleTime: formData.scheduledTime,
         totalFare: formData.totalTripAmount,
-        vendorCommissionPercentage: 0,
+        distance: formData.estimatedDistance || '0 km',
+        distanceCharge: dCharge > 0 ? dCharge.toFixed(2) : '0',
+        vendorCommissionPercentage: parseFloat(formData.commission) || 0,
       };
       
       const res = await apiService.createTrip(tripParams);
@@ -272,8 +361,13 @@ const AddTripScreen = ({ navigation }) => {
 
   const handleSave = async () => {
     try {
+      const vendor_data = await AsyncStorage.getItem('vendor_data');
+      const parsed = vendor_data ? JSON.parse(vendor_data) : null;
+      const vId = parsed?.vendorId || parsed?.phone || 'SYSTEM_VENDOR';
+
       const tripParams = {
         ...formData,
+        vendorId: vId,
         status: 'draft',
         pickupAddress: formData.pickup,
         dropAddress: formData.drop,
@@ -282,6 +376,7 @@ const AddTripScreen = ({ navigation }) => {
         scheduleDate: formData.scheduledDate,
         scheduleTime: formData.scheduledTime,
         totalFare: formData.totalTripAmount,
+        vendorCommissionPercentage: parseFloat(formData.commission) || 0,
       };
       const res = await apiService.createTrip(tripParams);
       if (res.success) {
@@ -291,6 +386,16 @@ const AddTripScreen = ({ navigation }) => {
       }
     } catch (err) {
       Alert.alert('Error', 'An error occurred while saving draft.');
+    }
+  };
+
+  const handleMoveToDraft = async () => {
+    try {
+      const tripId = route.params?.trip?.id || route.params?.trip?.tripId;
+      await apiService.updateTrip(tripId, { status: 'draft' });
+      Alert.alert('Success', 'Trip moved to draft.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+    } catch (err) {
+      Alert.alert('Error', 'Could not move to draft.');
     }
   };
 
@@ -329,7 +434,9 @@ const AddTripScreen = ({ navigation }) => {
       <View style={styles.priceInputWrapper}>
         <TextInput
           style={styles.priceInput}
-          value={value}
+          value={value === '0' ? '' : value}
+          placeholder="0"
+          placeholderTextColor="#999"
           keyboardType="numeric"
           onChangeText={(t) => setFormData({ ...formData, [key]: t })}
         />
@@ -353,14 +460,17 @@ const AddTripScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={24} color={COLORS.primaryDark} />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerActionBtn}>
+          <Icon name="arrow-left" size={26} color={COLORS.primaryDark} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create Booking</Text>
-        <View style={{ width: 24 }} />
+        <Text style={styles.headerTitle}>{isReadOnly ? 'Trip Details' : route.params?.trip ? 'Edit Trip' : 'Create Booking'}</Text>
+        <TouchableOpacity style={styles.headerActionBtn}>
+           <Icon name="dots-vertical" size={24} color={COLORS.primaryDark} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View pointerEvents={isReadOnly ? 'none' : 'auto'} style={{ opacity: isReadOnly ? 0.8 : 1 }}>
         {/* 1. Customer Card */}
         <View style={styles.card}>
           <Text style={styles.sectionHeaderTitle}>Customer Details</Text>
@@ -528,6 +638,30 @@ const AddTripScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
 
+          {formData.tripType === 'Tour Package' && (
+            <View style={styles.stopsContainer}>
+              <Text style={styles.subHeaderStyle}>Intermediate Stops (Optional)</Text>
+              {formData.stops.map((stop, index) => (
+                <View key={index} style={styles.stopRow}>
+                  <View style={styles.stopDot} />
+                  <TextInput
+                    style={styles.stopInput}
+                    placeholder={`Stop ${index + 1}`}
+                    value={stop}
+                    onChangeText={(t) => updateStop(t, index)}
+                  />
+                  <TouchableOpacity onPress={() => removeStop(index)}>
+                    <Icon name="close-circle" size={20} color={COLORS.error} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.addStopBtn} onPress={addStop}>
+                <Icon name="plus" size={18} color={COLORS.primary} />
+                <Text style={styles.addStopText}>Add Stop / Waypoint</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.mapContainer}>
             <MapView
               ref={mapRef}
@@ -548,6 +682,26 @@ const AddTripScreen = ({ navigation }) => {
               )}
             </MapView>
           </View>
+
+          {formData.estimatedDistance && formData.estimatedTime && (
+            <View style={styles.etaContainer}>
+              <View style={styles.etaBox}>
+                <Icon name="map-marker-distance" size={24} color={COLORS.primary} />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.etaLabel}>Total Distance</Text>
+                  <Text style={styles.etaValue}>{formData.estimatedDistance}</Text>
+                </View>
+              </View>
+              <View style={styles.etaDivider} />
+              <View style={styles.etaBox}>
+                <Icon name="clock-fast" size={24} color={COLORS.primary} />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.etaLabel}>Est. Traversal Time</Text>
+                  <Text style={styles.etaValue}>{formData.estimatedTime}</Text>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* Moved Schedule UI here */}
           <View style={[styles.topScheduleRow, { marginTop: 20 }]}>
@@ -650,10 +804,6 @@ const AddTripScreen = ({ navigation }) => {
                 {formData.tripType} {formData.tripType === 'Rental' ? `(${formData.rentalType})` : ''} Settings
               </Text>
             </View>
-            <TouchableOpacity style={styles.templateBtn}>
-              <Icon name="file-document-outline" size={18} color={COLORS.accentGold} />
-              <Text style={styles.templateText}>Load Template</Text>
-            </TouchableOpacity>
           </View>
           <View style={styles.divider} />
 
@@ -681,7 +831,9 @@ const AddTripScreen = ({ navigation }) => {
                     <Icon name="cash-multiple" size={22} color={COLORS.primary} />
                     <TextInput 
                         style={styles.totalInput}
-                        value={formData.totalTripAmount}
+                        value={formData.totalTripAmount === '0' ? '' : formData.totalTripAmount}
+                        placeholder="0"
+                        placeholderTextColor="#999"
                         keyboardType="numeric"
                         onChangeText={(t) => setFormData({...formData, totalTripAmount: t})}
                     />
@@ -722,23 +874,39 @@ const AddTripScreen = ({ navigation }) => {
                 </TouchableOpacity>
             </View>
         </View>
+        </View>
 
         {/* Actions Row */}
-        <View style={styles.actionButtonsContainer}>
-          <TouchableOpacity style={[styles.actionBtn, styles.saveBtn]} onPress={handleSave}>
-            <Icon name="content-save" size={22} color={COLORS.primary} />
-            <Text style={styles.actionBtnText}>Save</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.shareBtn]} onPress={handleShare}>
-            <Icon name="share-variant" size={22} color={COLORS.accentGold} />
-            <Text style={styles.actionBtnText}>Share</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.publishMainBtn} onPress={handlePublish}>
-            <LinearGradient colors={['#4CAF50', '#2E7D32']} style={styles.publishGradientSmall}>
-              <Text style={styles.publishTextSmall}>PUBLISH</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+        {isReadOnly ? (
+          <View style={styles.actionButtonsContainer}>
+            <TouchableOpacity style={[styles.actionBtn, styles.saveBtn, { flex: 1, marginRight: 10 }]} onPress={handleMoveToDraft}>
+              <Icon name="file-document-outline" size={22} color={COLORS.primary} />
+              <Text style={styles.actionBtnText}>Move to Draft</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.publishMainBtn, { flex: 1 }]} onPress={() => setIsReadOnly(false)}>
+              <LinearGradient colors={['#FF9800', '#F57C00']} style={styles.publishGradientSmall}>
+                <Icon name="pencil" size={22} color="#FFF" style={{ marginRight: 8 }} />
+                <Text style={styles.publishTextSmall}>EDIT</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.actionButtonsContainer}>
+            <TouchableOpacity style={[styles.actionBtn, styles.saveBtn]} onPress={handleSave}>
+              <Icon name="content-save" size={22} color={COLORS.primary} />
+              <Text style={styles.actionBtnText}>Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.actionBtn, styles.shareBtn]} onPress={handleShare}>
+              <Icon name="share-variant" size={22} color={COLORS.accentGold} />
+              <Text style={styles.actionBtnText}>Share</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.publishMainBtn} onPress={handlePublish}>
+              <LinearGradient colors={['#4CAF50', '#2E7D32']} style={styles.publishGradientSmall}>
+                <Text style={styles.publishTextSmall}>{route.params?.trip?.status === 'draft' ? 'PUBLISH' : 'UPDATE'}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <View style={{ height: 50 }} />
       </ScrollView>
@@ -800,9 +968,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md, height: 60, backgroundColor: COLORS.accentGold,
+    paddingHorizontal: SPACING.sm, height: 60, backgroundColor: COLORS.accentGold,
   },
-  headerTitle: { fontSize: 18, fontWeight: '900', color: COLORS.primaryDark },
+  headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '900', color: COLORS.primaryDark },
+  headerActionBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: SPACING.md, paddingBottom: 50 },
   topScheduleRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
   topScheduleBox: {
@@ -864,6 +1033,7 @@ const styles = StyleSheet.create({
   tripTypeCardActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   tripTypeLabel: { fontSize: 10, fontWeight: '700', color: COLORS.text, marginTop: 8, textAlign: 'center' },
   tripTypeLabelActive: { color: '#FFF' },
+  rentalTypeTextActive: { color: '#FFF' },
   rentalTypeRow: { flexDirection: 'row', marginTop: 5, justifyContent: 'center' },
   rentalTypeChip: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 8,
@@ -871,7 +1041,14 @@ const styles = StyleSheet.create({
   },
   rentalTypeChipActive: { backgroundColor: COLORS.accentGold },
   rentalTypeText: { marginLeft: 8, fontSize: 12, fontWeight: '700', color: COLORS.textMuted },
-  rentalTypeTextActive: { color: '#FFF' },
+
+  // Stops
+  stopsContainer: { marginTop: 15, paddingHorizontal: 5 },
+  stopRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  stopDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary, marginRight: 10 },
+  stopInput: { flex: 1, backgroundColor: '#F8F9FD', borderRadius: 10, padding: 8, fontSize: 13, fontWeight: '600', color: COLORS.text, borderWidth: 1, borderColor: '#EEE', marginRight: 10 },
+  addStopBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 10, padding: 5 },
+  addStopText: { marginLeft: 5, fontSize: 13, fontWeight: '800', color: COLORS.primary },
 
   settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   settingsTitleRow: { flexDirection: 'row', alignItems: 'center' },

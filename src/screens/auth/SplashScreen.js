@@ -9,6 +9,7 @@ import {
   Text,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme/AppTheme';
 
 const { height, width } = Dimensions.get('window');
@@ -51,10 +52,25 @@ const SplashScreen = ({ navigation }) => {
       ])
     ).start();
 
-    // 3. Navigation Delay
+    // 3. Navigation Delay and Auth Check
+    const checkAuth = async () => {
+      try {
+        const isLogged = await AsyncStorage.getItem('is_logged_in');
+        const vendorData = await AsyncStorage.getItem('vendor_data');
+        
+        if (isLogged === 'true' && vendorData) {
+          navigation.replace('Main');
+        } else {
+          navigation.replace('Language');
+        }
+      } catch (e) {
+        navigation.replace('Language');
+      }
+    };
+
     const timer = setTimeout(() => {
-      navigation.replace('Language');
-    }, 4000);
+      checkAuth();
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, []);

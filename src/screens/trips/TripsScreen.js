@@ -1,4 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   StyleSheet,
   View,
@@ -9,112 +11,147 @@ import {
   Dimensions,
   TextInput,
   ScrollView,
+  Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import LottieView from 'lottie-react-native';
+import apiService from '../../services/api';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme/AppTheme';
+import Loader from '../../components/Loader';
 
 const { width } = Dimensions.get('window');
 
 const STATUS_FILTERS = [
-  'All',
-  'Pending',
-  'Accepted',
-  'Pending Verification',
-  'Waiting',
-  'On the way',
-  'Completed',
+  'All', 'Draft', 'Pending', 'Verification', 'Approved',
+  'Way to Pickup', 'Arrived', 'Way to Drop', 'Reached', 'Completed',
 ];
 
-const STATUS_COLORS = {
-  'Pending': '#FF9800',
-  'Accepted': '#4CAF50',
-  'Pending Verification': '#9C27B0',
-  'Waiting': '#607D8B',
-  'On the way': '#2196F3',
-  'Completed': '#4CAF50',
-  'Default': '#757575'
+const STATUS_DISPLAY_NAMES = {
+  'draft': 'Draft', 'pending': 'Published', 'driverAccepted': 'Verification',
+  'vendorApproved': 'Approved', 'confirmed': 'Way to Pickup', 'arrived': 'Arrived',
+  'inProgress': 'Way to Drop', 'dropped': 'Reached', 'completed': 'Completed',
+  'commissionPending': 'Payment Pending', 'commissionRejected': 'Payment Rejected',
 };
 
-const MOCK_TRIPS = [
-  {
-    id: '1',
-    type: 'Active',
-    status: 'On the way',
-    from: 'P.N. Road, Tiruppur',
-    to: 'Avinashi Road, Coimbatore',
-    amount: '₹450',
-    date: '18 Mar, 10:30 AM',
-    driver: 'Murugan G',
-  },
-  {
-    id: '2',
-    type: 'Active',
-    status: 'Pending',
-    from: 'Railway Station, Erode',
-    to: 'Bus Stand, Bhavani',
-    amount: '₹220',
-    date: '18 Mar, 12:45 PM',
-    driver: 'Senthil K',
-  },
-  {
-    id: '3',
-    type: 'History',
-    status: 'Completed',
-    from: 'New Bus Stand, Salem',
-    to: 'Steel Plant Road, Salem',
-    amount: '₹180',
-    date: '17 Mar, 09:00 AM',
-    driver: 'Ravi M',
-  },
-  {
-    id: '4',
-    type: 'Active',
-    status: 'Accepted',
-    from: 'Gandhipuram, Coimbatore',
-    to: 'Saravanampatti, Coimbatore',
-    amount: '₹350',
-    date: '19 Mar, 02:00 PM',
-    driver: 'Vijay S',
-  },
-];
+const STATUS_COLORS = {
+  'Draft': '#90A4AE', 'Published': '#FF9800', 'Verification': '#9C27B0',
+  'Approved': '#4CAF50', 'Way to Pickup': '#2196F3', 'Arrived': '#00BCD4',
+  'Way to Drop': '#3F51B5', 'Reached': '#E91E63', 'Completed': '#4CAF50',
+  'Payment Pending': '#1565C0', 'Payment Rejected': '#D32F2F', 'Default': '#757575',
+};
 
-const TripsScreen = () => {
-  const [activeTab, setActiveTab] = useState('Active');
+const TripsScreen = ({ navigation }) => {
+  const [activeTab, setActiveTab]           = useState('Active');
   const [selectedStatus, setSelectedStatus] = useState('All');
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters]       = useState(false);
+  const [trips, setTrips]                   = useState([]);
+  const [loading, setLoading]               = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+
+  const fetchTrips = async () => {
+    setLoading(true);
+    try {
+      const stored = await AsyncStorage.getItem('vendor_data');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const vendorId = parsed.vendorId || parsed.phone;
+        const [tripsData, approvalsRes] = await Promise.all([
+          apiService.getTrips(vendorId),
+          apiService.getPendingApprovals(vendorId).catch(() => ({ data: [] })),
+        ]);
+        setTrips(tripsData);
+        setPendingApprovals(approvalsRes?.data || []);
+      }
+    } catch (err) {
+      console.error('Fetch Trips Error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTrip = async (tripId) => {
+    Alert.alert('Delete Draft', 'Are you sure you want to permanently delete this draft trip?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          try {
+            const res = await apiService.deleteTrip(tripId);
+            if (res.success) fetchTrips();
+          } catch { Alert.alert('Error', 'Failed to delete trip.'); }
+        },
+      },
+    ]);
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchTrips();
+      const interval = setInterval(() => {
+        fetchTrips();
+      }, 5000);
+      return () => clearInterval(interval);
+    }, [])
+  );
 
   useEffect(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 500,
-      useNativeDriver: true,
-    }).start();
+    Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
   }, [activeTab]);
 
+
   const renderTripCard = ({ item }) => {
-    const statusColor = STATUS_COLORS[item.status] || STATUS_COLORS.Default;
+    const statusKey = item.status || 'pending';
+    const displayName = STATUS_DISPLAY_NAMES[statusKey] || (statusKey.charAt(0).toUpperCase() + statusKey.slice(1));
+    const statusColor = STATUS_COLORS[displayName] || STATUS_COLORS.Default;
+    // Route driverAccepted trips to the approval screen
+    const handleCardPress = () => {
+      if (item.status === 'driverAccepted') {
+        navigation.navigate('DriverApproval', { trip: item });
+      } else if (['vendorApproved', 'inProgress', 'dropped', 'completed', 'commissionPending', 'commissionRejected'].includes(item.status)) {
+        navigation.navigate('TripTracking', { trip: item });
+      } else {
+        navigation.navigate('AddTrip', { trip: item });
+      }
+    };
+
     return (
-      <TouchableOpacity activeOpacity={0.9} style={styles.card}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        style={[styles.card, item.status === 'driverAccepted' && styles.cardHighlight]}
+        onPress={handleCardPress}
+      >
         <View style={styles.cardHeader}>
           <View style={[styles.statusBadge, { backgroundColor: statusColor + '15' }]}>
             <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusText, { color: statusColor }]}>
-              {item.status.toUpperCase()}
+              {displayName.toUpperCase()}
             </Text>
           </View>
-          <Text style={styles.amount}>{item.amount}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={styles.amount}>₹{item.totalTripAmount || item.totalFare || item.amount || '0'}</Text>
+            {item.status?.toLowerCase() === 'draft' && (
+              <TouchableOpacity 
+                style={styles.deleteBtn} 
+                onPress={() => handleDelete(item.tripId)}
+              >
+                <Icon name="trash-can-outline" size={20} color={COLORS.error} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
       <View style={styles.routeContainer}>
         <View style={styles.locationBlock}>
           <Icon name="record-circle-outline" size={18} color={COLORS.primary} />
-          <Text style={styles.address} numberOfLines={1}>{item.from}</Text>
+          <Text style={styles.address} numberOfLines={1}>{item.pickup || item.pickupAddress || 'No Pickup'}</Text>
         </View>
         <View style={styles.verticalLine} />
         <View style={styles.locationBlock}>
           <Icon name="map-marker-outline" size={18} color={COLORS.accentRose} />
-          <Text style={styles.address} numberOfLines={1}>{item.to}</Text>
+          <Text style={styles.address} numberOfLines={1}>{item.drop || item.dropAddress || 'No Drop'}</Text>
         </View>
       </View>
 
@@ -123,16 +160,42 @@ const TripsScreen = () => {
           <View style={styles.driverAvatar}>
             <Icon name="account" size={16} color={COLORS.primary} />
           </View>
-          <Text style={styles.driverName}>{item.driver}</Text>
+          <Text style={styles.driverName}>{item.driverName || item.driver || 'No Driver Assigned'}</Text>
         </View>
-        <Text style={styles.dateText}>{item.date}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {item.status?.toLowerCase() === 'draft' && (
+            <TouchableOpacity 
+              onPress={() => handleDeleteTrip(item.tripId)}
+              style={{ marginRight: 15 }}
+            >
+              <Icon name="delete-outline" size={20} color={COLORS.error} />
+            </TouchableOpacity>
+          )}
+          <Text style={styles.dateText}>{item.scheduleDate || item.date}</Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
 };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Pending Approvals Banner */}
+      {pendingApprovals.length > 0 && (
+        <TouchableOpacity
+          style={styles.approvalBanner}
+          onPress={() => navigation.navigate('DriverApproval', { trip: pendingApprovals[0] })}
+          activeOpacity={0.85}
+        >
+          <View style={styles.approvalBannerLeft}>
+            <Icon name="bell-ring" size={20} color="#FFF" />
+            <Text style={styles.approvalBannerText}>
+              {pendingApprovals.length} driver{pendingApprovals.length > 1 ? 's' : ''} waiting for approval
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={20} color="#FFF" />
+        </TouchableOpacity>
+      )}
       <View style={styles.header}>
         <Text style={styles.title}>Trip Records</Text>
         <View style={styles.searchBox}>
@@ -193,15 +256,31 @@ const TripsScreen = () => {
       )}
 
       <FlatList
-        data={MOCK_TRIPS.filter(trip => 
-          trip.type === activeTab && 
-          (selectedStatus === 'All' || trip.status === selectedStatus)
-        )}
+        data={trips.filter(trip => {
+          const status = trip.status?.toLowerCase() || '';
+          const type = (status === 'completed' || status === 'cancelled') ? 'History' : 'Active';
+          return type === activeTab && 
+          (selectedStatus === 'All' || status === selectedStatus.toLowerCase());
+        }).sort((a, b) => {
+          // Priority: driverAccepted (Verification) status first
+          if (a.status === 'driverAccepted' && b.status !== 'driverAccepted') return -1;
+          if (a.status !== 'driverAccepted' && b.status === 'driverAccepted') return 1;
+          return 0;
+        })}
         renderItem={renderTripCard}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item.id || item.tripId}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        refreshing={loading}
+        onRefresh={fetchTrips}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Icon name="car-off" size={48} color="#CCC" />
+            <Text style={styles.emptyText}>No {activeTab} trips found</Text>
+          </View>
+        }
       />
+      <Loader visible={loading && trips.length === 0} message="Syncing records..." />
     </View>
   );
 };
@@ -210,6 +289,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FA',
+    paddingTop: Platform.OS === 'android' ? 0 : 0, // Fallback
   },
   header: {
     padding: SPACING.lg,
@@ -317,6 +397,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.03)',
   },
+  cardHighlight: {
+    borderColor: '#9C27B0',
+    borderWidth: 2,
+    backgroundColor: '#FAFAFA',
+  },
+  approvalBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#9C27B0',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 14,
+  },
+  approvalBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  approvalBannerText: { color: '#FFF', fontSize: 14, fontWeight: '800' },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -345,6 +440,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     color: COLORS.text,
+  },
+  deleteBtn: {
+    marginLeft: 15,
+    padding: 5,
   },
   routeContainer: {
     marginBottom: 20,
@@ -397,6 +496,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textMuted,
     fontWeight: '700',
+  },
+  emptyContainer: {
+    paddingTop: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: COLORS.textMuted,
+    fontWeight: '600',
   },
 });
 

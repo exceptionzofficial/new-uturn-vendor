@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000,
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -30,6 +30,10 @@ const apiService = {
     const res = await apiClient.post('vendor/check-status', { phone });
     return res.data;
   },
+  getProfile: async (phone) => {
+    const res = await apiClient.get(`vendor/profile/${phone}`);
+    return res.data;
+  },
   sendOtp: async (phone) => {
     const res = await apiClient.post('vendor/send-otp', { phone });
     return res.data;
@@ -53,16 +57,17 @@ const apiService = {
 
   // Bookings / Trips
   createTrip: async (tripData) => {
-    const res = await apiClient.post('bookings/create', tripData);
+    const res = await apiClient.post('vendor/create-trip', tripData);
     return res.data;
   },
   updateTrip: async (id, tripData) => {
     const res = await apiClient.put(`vendor/trips/${id}`, tripData);
     return res.data;
   },
-  getTrips: async (status = '') => {
-    // Use the vendor trips endpoint, optionally filtering by status
-    const url = status ? `vendor/trips?status=${status}` : 'vendor/trips';
+  getTrips: async (vendorId = '', status = '') => {
+    let url = 'vendor/trips?';
+    if (vendorId) url += `vendorId=${vendorId}&`;
+    if (status) url += `status=${status}`;
     const res = await apiClient.get(url);
     return res.data;
   },
@@ -92,8 +97,8 @@ const apiService = {
     const res = await apiClient.post(`bookings/${id}/approve-driver`);
     return res.data;
   },
-  rejectDriver: async (id, reason) => {
-    const res = await apiClient.post(`bookings/${id}/reject-driver`, { reason });
+  rejectDriver: async (id, reason, driverId) => {
+    const res = await apiClient.post(`bookings/${id}/reject-driver`, { reason, driverId });
     return res.data;
   },
   verifyCashPayment: async (id) => {
@@ -106,6 +111,24 @@ const apiService = {
   },
   rejectCommission: async (id, reason) => {
     const res = await apiClient.post(`bookings/${id}/reject-commission`, { reason });
+    return res.data;
+  },
+
+  // Driver Pending Approvals
+  getPendingApprovals: async (vendorId) => {
+    const res = await apiClient.get(`bookings/vendor/${vendorId}/pending-approvals`);
+    return res.data;
+  },
+
+  // Get single trip detail
+  getTripDetail: async (tripId) => {
+    const res = await apiClient.get(`bookings/${tripId}`);
+    return res.data;
+  },
+
+  // Mark commission as paid (vendor paying driver — customer_pays_vendor mode)
+  markCommissionPaid: async (tripId) => {
+    const res = await apiClient.post(`bookings/${tripId}/approve-commission`);
     return res.data;
   },
 };

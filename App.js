@@ -15,6 +15,8 @@ import MainScreen from './src/screens/main/MainScreen';
 import AddTripScreen from './src/screens/trips/AddTripScreen';
 import WalletScreen from './src/screens/features/WalletScreen';
 import ProfileScreen from './src/screens/features/ProfileScreen';
+import DriverApprovalScreen from './src/screens/trips/DriverApprovalScreen';
+import TripTrackingScreen from './src/screens/trips/TripTrackingScreen';
 
 const Stack = createStackNavigator();
 
@@ -40,6 +42,8 @@ const App = () => {
         <Stack.Screen name="AddTrip" component={AddTripScreen} />
         <Stack.Screen name="Wallet" component={WalletScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="DriverApproval" component={DriverApprovalScreen} />
+        <Stack.Screen name="TripTracking" component={TripTrackingScreen} />
       </Stack.Navigator>
     </NavigationContainer>
     </GestureHandlerRootView>

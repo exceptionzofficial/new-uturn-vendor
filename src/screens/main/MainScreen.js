@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
   },
   tabBarWrapper: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 30 : 15,
+    bottom: Platform.OS === 'ios' ? 40 : 45,
     left: 20,
     right: 20,
     ...SHADOW.premium,

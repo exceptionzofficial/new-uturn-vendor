@@ -15,8 +15,7 @@ import {
   StatusBar,
   Image,
 } from 'react-native';
-
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -122,13 +121,21 @@ const RegisterScreen = ({ navigation, route }) => {
       const response = await apiClient.register(form);
 
       if (response.success) {
+        // Save full details immediately to AsyncStorage
+        const vendorDataToSave = response.vendor || payload;
+        await AsyncStorage.setItem('vendor_data', JSON.stringify({
+          ...vendorDataToSave,
+          isLoggedIn: true
+        }));
+
         Alert.alert('Success', 'Application Submitted. We will verify your documents soon.', [
           { text: 'OK', onPress: () => navigation.replace('Splash') }
         ]);
       }
     } catch (err) {
       console.error('Registration Error:', err);
-      Alert.alert('Error', 'Failed to submit registration. Please try again.');
+      const errorMsg = err.response?.data?.error || err.message || 'Unknown error';
+      Alert.alert('Registration Failed [V1.2]', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -172,6 +179,9 @@ const RegisterScreen = ({ navigation, route }) => {
       cropping: true,
       includeBase64: false,
       useFrontCamera: type === 'profile',
+      compressImageQuality: 0.7,
+      compressImageMaxWidth: 1000,
+      compressImageMaxHeight: 1000,
     };
 
     ImagePicker.openCamera(options)
@@ -236,9 +246,10 @@ const RegisterScreen = ({ navigation, route }) => {
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.sectionHeading}>PERSONAL INFO</Text>
-            {renderInputField('Full Name', 'account-outline', formData.name, (t) => setFormData({ ...formData, name: t }), 'Full Legal Name')}
+            <Text style={styles.sectionHeading}>PROFILE & PERSONAL</Text>
+            {renderUploadCard('Profile Picture', 'Clear face photo', 'camera-outline', 'profile', profilePicture)}
             
+            {renderInputField('Full Name', 'account-outline', formData.name, (t) => setFormData({ ...formData, name: t }), 'Full Legal Name')}
             {renderSelector('Date of Birth', 'calendar-outline', formData.dob, () => setShowDatePicker(true))}
 
             <View style={styles.divider} />
@@ -253,7 +264,6 @@ const RegisterScreen = ({ navigation, route }) => {
 
             <Text style={styles.sectionHeading}>IDENTITY DOCUMENTS</Text>
             {renderUploadCard('Aadhar ID Proof', 'Front & Back of Aadhar Card', 'card-account-details-outline', 'aadhar', aadharImage)}
-            {renderUploadCard('Profile Picture', 'Clear face photo', 'camera-outline', 'profile', profilePicture)}
           </View>
 
 

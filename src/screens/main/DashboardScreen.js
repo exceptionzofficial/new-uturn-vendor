@@ -11,10 +11,14 @@ import {
   FlatList,
   Easing,
   TouchableWithoutFeedback,
+  Modal,
+  Alert,
 } from 'react-native';
 import LottieView from 'lottie-react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import apiService from '../../services/api';
 import { COLORS, RADIUS, SHADOW, SPACING } from '../../theme/AppTheme';
 
 const { width } = Dimensions.get('window');
@@ -113,6 +117,34 @@ const DashboardScreen = ({ navigation }) => {
     return () => clearInterval(interval);
   }, [activeBanner]);
 
+  const [vendorName, setVendorName] = useState('U-Turn Vendor');
+  const [vendorStatus, setVendorStatus] = useState('approved'); // Default to approved to avoid flicker
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      const data = await AsyncStorage.getItem('vendor_data');
+      if (data) {
+        const parsed = JSON.parse(data);
+        setVendorName(parsed.businessName || parsed.name || 'U-Turn Vendor');
+        setVendorStatus(parsed.status || 'pending');
+
+        if (parsed.phone) {
+          try {
+            const res = await apiService.getProfile(parsed.phone);
+            if (res.success && res.vendor) {
+              setVendorName(res.vendor.businessName || res.vendor.name || 'U-Turn Vendor');
+              setVendorStatus(res.vendor.status || 'pending');
+              await AsyncStorage.setItem('vendor_data', JSON.stringify({ ...res.vendor, phone: parsed.phone }));
+            }
+          } catch (e) {
+            console.log('Dashboard profile fetch error:', e);
+          }
+        }
+      }
+    };
+    fetchProfile();
+  }, []);
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -129,11 +161,22 @@ const DashboardScreen = ({ navigation }) => {
     ]).start();
   }, []);
 
+  const handleServicePress = (item) => {
+    if (item.label === 'Jobs') {
+      navigation.navigate('Trips');
+    } else if (item.label === 'Profit Analysis') {
+      navigation.navigate('Wallet');
+    } else {
+      Alert.alert('Coming Soon', `${item.label} feature is under development.`);
+    }
+  };
+
   const renderServiceCard = (item) => (
     <TouchableOpacity
       key={item.id}
       activeOpacity={0.8}
       style={[styles.serviceCard, { borderColor: item.color + '20' }]}
+      onPress={() => handleServicePress(item)}
     >
       <View style={styles.iconContainer}>
         <Image source={item.image} style={styles.serviceIconImage} resizeMode="contain" />
@@ -141,6 +184,8 @@ const DashboardScreen = ({ navigation }) => {
       <Text style={styles.serviceLabel}>{item.label}</Text>
     </TouchableOpacity>
   );
+
+
 
   const renderBanner = ({ item }) => (
     <View style={styles.bannerContainer}>
@@ -159,19 +204,20 @@ const DashboardScreen = ({ navigation }) => {
           style={styles.headerBackground}
         />
         <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.navigate('Profile')}>
-            <Image
-              source={require('../../assets/logo.png')}
-              style={{ width: 90, height: 35 }}
-              resizeMode="contain"
-            />
+          <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Profile')}>
+            <View style={styles.avatarWrapper}>
+              <Icon name="account-circle" size={40} color="#FFF" />
+            </View>
           </TouchableOpacity>
           <View style={styles.headerMiddle}>
             <Text style={styles.greeting}>Welcome back,</Text>
-            <Text style={styles.vendorName} numberOfLines={1}>Global Logistics</Text>
+            <Text style={styles.vendorName} numberOfLines={1}>{vendorName}</Text>
           </View>
           <TouchableOpacity style={styles.notifBtn}>
-            <Icon name="bell-badge-outline" size={24} color="#FFF" />
+            <View style={styles.notifBadge}>
+               <Icon name="bell-outline" size={24} color="#FFF" />
+               <View style={styles.notifDot} />
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -349,6 +395,45 @@ const DashboardScreen = ({ navigation }) => {
           </View>
         </Animated.View>
       )}
+
+      {/* Verification Guard Modal */}
+      <Modal
+        visible={
+          vendorStatus?.toUpperCase() !== 'APPROVED' && 
+          vendorStatus?.toUpperCase() !== 'ACTIVE' && 
+          vendorStatus?.toUpperCase() !== 'VERIFIED'
+        }
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.statusModal}>
+            <LottieView
+              source={require('../../assets/radar.json')}
+              autoPlay
+              loop
+              style={{ width: 140, height: 140 }}
+            />
+            <Text style={styles.modalTitle}>Verification in Progress</Text>
+            <Text style={styles.modalText}>
+              Your account is currently being reviewed. 
+              You will have full access once our team verifies your documents.
+            </Text>
+            
+            <View style={styles.pendingBadge}>
+              <Icon name="clock-outline" size={16} color="#FF9800" />
+              <Text style={styles.pendingText}>STATUS: {vendorStatus?.toUpperCase() || 'PENDING'}</Text>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.profileRedirectBtn}
+              onPress={() => navigation.navigate('Profile')}
+            >
+              <Text style={styles.profileRedirectText}>VIEW MY PROFILE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -374,31 +459,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
   },
-  menuBtn: {
-    marginRight: 15,
+  profileBtn: {
+    padding: 2,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  avatarWrapper: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerMiddle: {
     flex: 1,
+    marginLeft: 15,
   },
   greeting: {
-    fontSize: 11,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.5,
   },
   vendorName: {
-    fontSize: 16,
-    fontWeight: '900',
+    fontSize: 20,
     color: '#FFF',
-    marginTop: 2,
+    fontWeight: '900',
+    letterSpacing: -0.5,
   },
   notifBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'relative',
+  },
+  notifDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFEB3B',
+    borderWidth: 1.5,
+    borderColor: '#B71C1C',
+  },
+  menuBtn: {
+    marginRight: 15,
   },
   announcementContainer: {
     height: 35,
@@ -641,6 +751,67 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.textMuted,
     marginTop: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  statusModal: {
+    width: '100%',
+    backgroundColor: '#FFF',
+    borderRadius: 32,
+    padding: 32,
+    alignItems: 'center',
+    ...SHADOW.large,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#1A237E',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  modalText: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    textAlign: 'center',
+    marginTop: 15,
+    lineHeight: 22,
+    fontWeight: '600',
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 25,
+  },
+  pendingText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FF9800',
+    marginLeft: 8,
+    letterSpacing: 1,
+  },
+  profileRedirectBtn: {
+    marginTop: 30,
+    paddingVertical: 18,
+    width: '100%',
+    alignItems: 'center',
+    backgroundColor: '#1A237E',
+    borderRadius: 18,
+    ...SHADOW.large,
+  },
+  profileRedirectText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 1,
   },
 });
 
